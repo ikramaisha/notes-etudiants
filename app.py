@@ -1,7 +1,9 @@
+
 import os
 import sqlite3
 
 from flask import Flask, jsonify, request
+from auth import utilisateur_connecte
 
 app = Flask(__name__)
 DB = "notes.db"
@@ -57,6 +59,52 @@ def lister_notes():
             for r in rows
         ]
     )
+
+
+@app.route("/notes/<int:note_id>", methods=["PUT"])
+def modifier_note(note_id):
+    utilisateur = utilisateur_connecte()
+
+    if utilisateur is None:
+        return jsonify(erreur="Authentification requise"), 401
+
+    if utilisateur.get("role") != "enseignant":
+        return jsonify(erreur="Accès interdit"), 403
+
+    donnees = request.get_json(silent=True) or {}
+    nouvelle_note = donnees.get("note")
+
+    if (
+        isinstance(nouvelle_note, bool)
+        or not isinstance(nouvelle_note, (int, float))
+        or not 0 <= nouvelle_note <= 20
+    ):
+        return jsonify(erreur="Note invalide"), 400
+
+    try:
+        with sqlite3.connect(DB) as con:
+            resultat = con.execute(
+                "SELECT module FROM notes WHERE id = ?",
+                (note_id,)
+            ).fetchone()
+
+            if resultat is None:
+                return jsonify(erreur="Note introuvable"), 404
+
+            module_note = resultat[0]
+
+            if utilisateur.get("module") != module_note:
+                return jsonify(erreur="Accès interdit"), 403
+
+            con.execute(
+                "UPDATE notes SET note = ? WHERE id = ?",
+                (nouvelle_note, note_id)
+            )
+
+        return jsonify(status="ok"), 200
+
+    except sqlite3.Error:
+        return jsonify(erreur="Erreur interne"), 500
 
 
 if __name__ == "__main__":
